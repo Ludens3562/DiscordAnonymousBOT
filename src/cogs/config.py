@@ -6,7 +6,7 @@ import json
 import os
 import base64
 
-from models import GuildSettings, ConfigHistory
+from models import GuildSettings, ConfigHistory, NgWord
 from database import get_db
 
 # 仕様書の付録にあるデフォルト設定
@@ -187,7 +187,7 @@ class ConfigCog(commands.Cog):
         finally:
             db.close()
 
-    conversion = app_commands.Group(name="conversionchannel", description="誤投稿変換機能の対象チャンネルを管理します。")
+    conversion = app_commands.Group(name="conversionchannel", description="誤投稿変換機能の対象チャンネルを管理します。", default_permissions=discord.Permissions(manage_guild=True))
 
     @conversion.command(name="add", description="変換対象にチャンネルを追加します。")
     @app_commands.describe(channel="追加するテキストチャンネル")
@@ -271,6 +271,103 @@ class ConfigCog(commands.Cog):
             
             channel_mentions = [f"<#{channel_id}>" for channel_id in conversion_channels]
             embed = discord.Embed(title="変換対象チャンネル一覧", description="\n".join(channel_mentions), color=discord.Color.blue())
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        finally:
+            db.close()
+
+    # NGワード管理コマンド
+    ngword = app_commands.Group(name="ngword", description="NGワードを管理します。", default_permissions=discord.Permissions(manage_guild=True))
+
+    @ngword.command(name="add", description="NGワードを追加します。")
+    @app_commands.describe(
+        word="追加するNGワード",
+        match_type="一致種別を選択してください"
+    )
+    @app_commands.choices(match_type=[
+        app_commands.Choice(name="部分一致 (partial)", value="partial"),
+        app_commands.Choice(name="完全一致 (exact)", value="exact"),
+        app_commands.Choice(name="正規表現 (regex)", value="regex"),
+    ])
+    @app_commands.default_permissions(manage_guild=True)
+    async def ngword_add(self, interaction: discord.Interaction, word: str, match_type: str):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            guild_id = str(interaction.guild.id)
+            
+            existing_word = db.query(NgWord).filter_by(guild_id=guild_id, word=word, match_type=match_type).first()
+            if existing_word:
+                await interaction.followup.send(f"NGワード `{word}` ({match_type}) は既に登録されています。", ephemeral=True)
+                return
+
+            new_ng_word = NgWord(
+                guild_id=guild_id,
+                word=word,
+                match_type=match_type,
+                added_by=str(interaction.user.id)
+            )
+            db.add(new_ng_word)
+            db.commit()
+            
+            await interaction.followup.send(f"NGワード `{word}` ({match_type}) を追加しました。", ephemeral=True)
+        except Exception as e:
+            db.rollback()
+            await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
+        finally:
+            db.close()
+
+    @ngword.command(name="remove", description="NGワードを削除します。")
+    @app_commands.describe(
+        word="削除するNGワード",
+        match_type="一致種別"
+    )
+    @app_commands.choices(match_type=[
+        app_commands.Choice(name="部分一致 (partial)", value="partial"),
+        app_commands.Choice(name="完全一致 (exact)", value="exact"),
+        app_commands.Choice(name="正規表現 (regex)", value="regex"),
+    ])
+    @app_commands.default_permissions(manage_guild=True)
+    async def ngword_remove(self, interaction: discord.Interaction, word: str, match_type: str):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            guild_id = str(interaction.guild.id)
+            
+            ng_word_to_delete = db.query(NgWord).filter_by(guild_id=guild_id, word=word, match_type=match_type).first()
+            
+            if not ng_word_to_delete:
+                await interaction.followup.send(f"NGワード `{word}` ({match_type}) は見つかりませんでした。", ephemeral=True)
+                return
+
+            db.delete(ng_word_to_delete)
+            db.commit()
+            
+            await interaction.followup.send(f"NGワード `{word}` ({match_type}) を削除しました。", ephemeral=True)
+        except Exception as e:
+            db.rollback()
+            await interaction.followup.send(f"エラーが発生しました: {e}", ephemeral=True)
+        finally:
+            db.close()
+
+    @ngword.command(name="list", description="登録されているNGワードの一覧を表示します。")
+    @app_commands.default_permissions(manage_guild=True)
+    async def ngword_list(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            guild_id = str(interaction.guild.id)
+            ng_words = db.query(NgWord).filter_by(guild_id=guild_id).order_by(NgWord.added_at).all()
+            
+            if not ng_words:
+                await interaction.followup.send("登録されているNGワードはありません。", ephemeral=True)
+                return
+            
+            embed = discord.Embed(title="NGワード一覧", color=discord.Color.orange())
+            description = ""
+            for ng_word in ng_words:
+                description += f"- `{ng_word.word}` ({ng_word.match_type})\n"
+            
+            embed.description = description
             await interaction.followup.send(embed=embed, ephemeral=True)
         finally:
             db.close()

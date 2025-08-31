@@ -34,7 +34,7 @@ class AnonymousPost(Base):
     original_message_id = Column(String(64))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     deleted_at = Column(DateTime(timezone=True))
-    deleted_by = Column(String(30))
+    deleted_by = Column(String(512))
 
     __table_args__ = (
         Index('idx_anonymous_posts_guild_channel', 'guild_id', 'channel_id'),
@@ -87,6 +87,7 @@ class UserCommandLog(Base):
     command_name = Column(String(100), nullable=False)
     executed_by_signature = Column(String(128), nullable=False)
     params = Column(JSON)
+    success = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -220,12 +221,13 @@ class NgWord(Base):
     id = Column(BigInteger, primary_key=True)
     guild_id = Column(String(30), nullable=False)
     word = Column(String(255), nullable=False)
+    match_type = Column(String(20), nullable=False, server_default='partial')  # partial, exact, regex
     action = Column(String(20), nullable=False, default='block')  # e.g., block, warn, delete
     added_by = Column(String(30))
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint('guild_id', 'word', name='uq_ng_word_guild_word'),
+        UniqueConstraint('guild_id', 'word', 'match_type', name='uq_ng_word_guild_word_type'),
     )
 
 

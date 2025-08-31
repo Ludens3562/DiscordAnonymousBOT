@@ -45,9 +45,17 @@ class ConversionView(discord.ui.View):
             await self.cog_instance.convert_message(interaction, self.original_message)
             if self.confirmation_message:
                 await self.confirmation_message.delete()
+        except ValueError as e:
+            error_messages = {
+                "Banned user": "❌ あなたはこのサーバーまたはBOTからBANされています。",
+                "Rate limit exceeded": "❌ レート制限に達しました。しばらくしてから再試行してください。",
+                "NG word detected": "❌ メッセージに不適切な単語が含まれているため、変換をブロックしました。",
+            }
+            message = error_messages.get(str(e), "❌ メッセージが長すぎるか、その他の理由で変換できませんでした。")
+            await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             logger.error(f"Error during conversion: {e}", exc_info=True)
-            await interaction.followup.send("変換中にエラーが発生しました。", ephemeral=True)
+            await interaction.followup.send("変換中に予期せぬエラーが発生しました。", ephemeral=True)
         self.stop()
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
@@ -101,7 +109,14 @@ class ConversionCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild or not isinstance(message.channel, discord.TextChannel):
+        if message.author.bot or not message.guild:
+            return
+        
+        # テキストチャンネルか、フォーラムチャンネル内のスレッドでのみ動作
+        is_text_channel = isinstance(message.channel, discord.TextChannel)
+        is_thread_in_forum = isinstance(message.channel, discord.Thread) and isinstance(message.channel.parent, discord.ForumChannel)
+        
+        if not is_text_channel and not is_thread_in_forum:
             return
 
         # Ensure AnonymousPostCog is ready
@@ -121,7 +136,12 @@ class ConversionCog(commands.Cog):
             conversion_channels = settings.get("conversion_channels", [])
             timeout = settings.get("conversion_timeout", 30.0)
 
-            if str(message.channel.id) in conversion_channels:
+            target_channel_id = str(message.channel.id)
+            # スレッドの場合、親チャンネル（フォーラム）が変換対象かチェック
+            if isinstance(message.channel, discord.Thread):
+                target_channel_id = str(message.channel.parent_id)
+
+            if target_channel_id in conversion_channels:
                 view = ConversionView(message.author, self, message, timeout)
                 confirmation_message = await message.reply(
                     "このメッセージを匿名投稿に変換しますか？",
@@ -156,10 +176,9 @@ class ConversionCog(commands.Cog):
             except discord.NotFound:
                 pass  # Already deleted
 
-        except ValueError as e:
-            logger.warning(f"Failed to convert message due to validation error: {e}")
-            # ユーザーには一般的なエラーメッセージを表示
-            raise Exception("Validation error during conversion.")
+        except ValueError:
+            # ValueErrorはそのまま呼び出し元に伝播させる
+            raise
         except Exception as e:
             logger.error(f"Failed to convert message: {e}", exc_info=True)
             db.rollback()

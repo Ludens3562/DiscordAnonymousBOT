@@ -137,7 +137,7 @@ class AdminLogView(discord.ui.View):
                         value_str += f"**対象者:** `ID復号失敗`\n"
 
                 value_str += f"**実行日時:** {log.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                value_str += f"**成功/失敗:** {'Success' if log.success else 'Failure'}"
+                value_str += f"**成功/失敗:** {'✅ Success' if log.success else '❌ Failure'}"
 
                 embed.add_field(
                     name=f"コマンド: `{log.command_name}`",
@@ -226,32 +226,32 @@ class ModerationCog(commands.Cog):
 
             if global_ban:
                 if not await self.bot.is_owner(interaction.user):
-                    await interaction.followup.send("グローバルBANはBOTのオーナーのみが実行できます。", ephemeral=True)
+                    await interaction.followup.send("❌ グローバルBANはBOTのオーナーのみが実行できます。", ephemeral=True)
                     return
                 existing_ban = db.query(BotBannedUser).filter_by(user_id=user_id).first()
                 if existing_ban:
-                    await interaction.followup.send(f"{user.mention} は既にグローバルBANされています。", ephemeral=True)
+                    await interaction.followup.send(f"❌ {user.mention} は既にグローバルBANされています。", ephemeral=True)
                     return
                 new_ban = BotBannedUser(user_id=user_id, banned_by=banned_by_id)
                 db.add(new_ban)
                 db.commit()
-                await interaction.followup.send(f"{user.mention} をグローバルBANしました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {user.mention} をグローバルBANしました。", ephemeral=True)
             else:
                 existing_ban = db.query(GuildBannedUser).filter_by(guild_id=guild_id, user_id=user_id).first()
                 if existing_ban:
-                    await interaction.followup.send(f"{user.mention} は既にこのサーバーでBANされています。", ephemeral=True)
+                    await interaction.followup.send(f"❌ {user.mention} は既にこのサーバーでBANされています。", ephemeral=True)
                     return
                 new_ban = GuildBannedUser(guild_id=guild_id, user_id=user_id, banned_by=banned_by_id)
                 db.add(new_ban)
                 db.commit()
-                await interaction.followup.send(f"{user.mention} をこのサーバーの匿名投稿からBANしました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {user.mention} をこのサーバーの匿名投稿からBANしました。", ephemeral=True)
             
             success = True
 
         except Exception as e:
             db.rollback()
             logger.error(f"An error occurred in 'ban' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
@@ -284,30 +284,30 @@ class ModerationCog(commands.Cog):
             
             if global_unban:
                 if not await self.bot.is_owner(interaction.user):
-                    await interaction.followup.send("グローバルBANの解除はBOTのオーナーのみが実行できます。", ephemeral=True)
+                    await interaction.followup.send("❌ グローバルBANの解除はBOTのオーナーのみが実行できます。", ephemeral=True)
                     return
                 ban_to_remove = db.query(BotBannedUser).filter_by(user_id=user_id).first()
                 if not ban_to_remove:
-                    await interaction.followup.send(f"{user.mention} はグローバルBANされていません。", ephemeral=True)
+                    await interaction.followup.send(f"❌ {user.mention} はグローバルBANされていません。", ephemeral=True)
                     return
                 db.delete(ban_to_remove)
                 db.commit()
-                await interaction.followup.send(f"{user.mention} のグローバルBANを解除しました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {user.mention} のグローバルBANを解除しました。", ephemeral=True)
             else:
                 ban_to_remove = db.query(GuildBannedUser).filter_by(guild_id=guild_id, user_id=user_id).first()
                 if not ban_to_remove:
-                    await interaction.followup.send(f"{user.mention} はこのサーバーでBANされていません。", ephemeral=True)
+                    await interaction.followup.send(f"❌ {user.mention} はこのサーバーでBANされていません。", ephemeral=True)
                     return
                 db.delete(ban_to_remove)
                 db.commit()
-                await interaction.followup.send(f"{user.mention} のBANを解除しました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {user.mention} のBANを解除しました。", ephemeral=True)
 
             success = True
 
         except Exception as e:
             db.rollback()
             logger.error(f"An error occurred in 'unban' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
@@ -334,7 +334,7 @@ class ModerationCog(commands.Cog):
 
             post = db.query(AnonymousPost).filter_by(guild_id=guild_id, message_id=message_id).first()
             if not post:
-                await interaction.followup.send("指定されたメッセージIDの投稿が見つかりません。", ephemeral=True)
+                await interaction.followup.send("❌ 指定されたメッセージIDの投稿が見つかりません。", ephemeral=True)
                 return
 
             config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
@@ -357,24 +357,25 @@ class ModerationCog(commands.Cog):
                 embed.add_field(name="投稿日時", value=post.created_at.strftime('%Y-%m-%d %H:%M:%S'), inline=True)
                 embed.add_field(name="誤投稿変換", value='あり' if post.is_converted else 'なし', inline=True)
 
-                now = datetime.utcnow()
+                now = discord.utils.utcnow()
                 created_at_days = (now - user.created_at).days
                 embed.add_field(name="アカウント作成日時", value=f"{user.created_at.strftime('%Y-%m-%d %H:%M:%S')} ({created_at_days}日前)", inline=False)
 
                 if member and member.joined_at:
+                    # ここも修正
                     joined_at_days = (now - member.joined_at).days
                     embed.add_field(name="サーバー参加日時", value=f"{member.joined_at.strftime('%Y-%m-%d %H:%M:%S')} ({joined_at_days}日前)", inline=False)
 
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
-                await interaction.followup.send("ユーザーIDの復号に失敗しました。キーが変更されたか、データが破損している可能性があります。", ephemeral=True)
+                await interaction.followup.send("❌ ユーザーIDの復号に失敗しました。キーが変更されたか、データが破損している可能性があります。", ephemeral=True)
             
             success = True
 
         except Exception as e:
             db.rollback()
             logger.error(f"An error occurred in 'trace' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
@@ -402,7 +403,7 @@ class ModerationCog(commands.Cog):
         encrypted_user_id = None
         try:
             if not 1 <= days <= 90:
-                await interaction.followup.send("日数は1から90の間で指定してください。", ephemeral=True)
+                await interaction.followup.send("❌ 日数は1から90の間で指定してください。", ephemeral=True)
                 return
 
             guild_id = str(interaction.guild.id)
@@ -413,7 +414,7 @@ class ModerationCog(commands.Cog):
             guild_salt = settings['guild_salt']
             encrypted_user_id = encryptor.encrypt(user_id, guild_salt)
 
-            start_date = datetime.utcnow() - timedelta(days=days)
+            start_date = discord.utils.utcnow() - timedelta(days=days)
             query = db.query(AnonymousPost).filter(
                 AnonymousPost.guild_id == guild_id,
                 AnonymousPost.created_at >= start_date
@@ -433,7 +434,7 @@ class ModerationCog(commands.Cog):
                     user_posts_found.append(post)
 
             if not user_posts_found:
-                await interaction.followup.send(f"{user.mention} による過去{days}日間の匿名投稿は見つかりませんでした。", ephemeral=True)
+                await interaction.followup.send(f"ℹ️ {user.mention} による過去{days}日間の匿名投稿は見つかりませんでした。", ephemeral=True)
                 # This is not an error, so we mark it as a success.
                 success = True
                 return
@@ -447,14 +448,14 @@ class ModerationCog(commands.Cog):
         except Exception as e:
             db.rollback()
             logger.error(f"An error occurred in 'user_posts' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='user_posts',
                 executed_by=str(interaction.user.id),
                 target_user_id=encrypted_user_id,
-                params={'target_user_raw_id': str(user.id), 'days': days, 'deleted_status': deleted_status.value},
+                params={'days': days, 'deleted_status': deleted_status.value},
                 success=success
             )
             db.add(log)
@@ -491,7 +492,7 @@ class ModerationCog(commands.Cog):
                 try:
                     target_user = await commands.UserConverter().convert(interaction, condition_value)
                 except commands.UserNotFound:
-                    await interaction.followup.send("指定されたユーザーが見つかりません。", ephemeral=True)
+                    await interaction.followup.send("❌ 指定されたユーザーが見つかりません。", ephemeral=True)
                     return
                 user_id = str(target_user.id)
                 
@@ -511,7 +512,7 @@ class ModerationCog(commands.Cog):
                     query = query.order_by(AnonymousPost.created_at.desc()).limit(limit)
                 elif condition_type == ConditionType.hours:
                     hours = int(condition_value)
-                    since = datetime.utcnow() - timedelta(hours=hours)
+                    since = discord.utils.utcnow() - timedelta(hours=hours)
                     query = query.filter(AnonymousPost.created_at >= since)
                 elif condition_type == ConditionType.contains:
                     query = query.filter(AnonymousPost.content.contains(condition_value))
@@ -521,7 +522,7 @@ class ModerationCog(commands.Cog):
                         pattern = re.compile(condition_value)
                         posts_to_delete = [p for p in all_posts_in_scope if pattern.search(p.content)]
                     except re.error as e:
-                        await interaction.followup.send(f"正規表現エラー: {e}", ephemeral=True)
+                        await interaction.followup.send(f"❌ 正規表現エラー: {e}", ephemeral=True)
                         return
                 elif condition_type == ConditionType.anonymous_id:
                     query = query.filter(AnonymousPost.anonymous_id == condition_value)
@@ -534,7 +535,7 @@ class ModerationCog(commands.Cog):
                     posts_to_delete = query.all()
 
             if not posts_to_delete:
-                await interaction.followup.send("削除対象の投稿は見つかりませんでした。", ephemeral=True)
+                await interaction.followup.send("ℹ️ 削除対象の投稿は見つかりませんでした。", ephemeral=True)
                 success = True
                 return
 
@@ -551,7 +552,7 @@ class ModerationCog(commands.Cog):
                 post_ids_to_delete = [p.id for p in posts_to_delete]
                 
                 db.query(AnonymousPost).filter(AnonymousPost.id.in_(post_ids_to_delete)).update({
-                    'deleted_at': datetime.utcnow(),
+                    'deleted_at': discord.utils.utcnow(),
                     'deleted_by': str(interaction.user.id)
                 }, synchronize_session=False)
 
@@ -567,14 +568,14 @@ class ModerationCog(commands.Cog):
                 db.add(history)
                 db.commit()
                 
-                await interaction.followup.send(f"{len(post_ids_to_delete)} 件の投稿を論理削除しました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {len(post_ids_to_delete)} 件の投稿を論理削除しました。", ephemeral=True)
             
             success = True
 
         except Exception as e:
             db.rollback()
             logger.error(f"An error occurred in 'bulk_delete' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
@@ -601,14 +602,14 @@ class ModerationCog(commands.Cog):
         db: Session = next(get_db())
         try:
             if not 1 <= days <= 90:
-                await interaction.followup.send("日数は1から90の間で指定してください。", ephemeral=True)
+                await interaction.followup.send("❌ 日数は1から90の間で指定してください。", ephemeral=True)
                 return
 
             guild_id = str(interaction.guild.id)
             
             query = db.query(AdminCommandLog).filter(AdminCommandLog.guild_id == guild_id)
 
-            start_date = datetime.utcnow() - timedelta(days=days)
+            start_date = discord.utils.utcnow() - timedelta(days=days)
             query = query.filter(AdminCommandLog.created_at >= start_date)
 
             if command_name:
@@ -628,7 +629,7 @@ class ModerationCog(commands.Cog):
             logs = query.order_by(AdminCommandLog.created_at.desc()).all()
 
             if not logs:
-                await interaction.followup.send("指定された条件のログは見つかりませんでした。", ephemeral=True)
+                await interaction.followup.send("ℹ️ 指定された条件のログは見つかりませんでした。", ephemeral=True)
                 return
 
             title = f"管理コマンド実行ログ (過去{days}日間)"
@@ -639,7 +640,7 @@ class ModerationCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"An error occurred in 'admin_logs' command.", exc_info=True)
-            await interaction.followup.send(f"エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             db.close()
 

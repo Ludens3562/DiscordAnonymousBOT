@@ -9,6 +9,7 @@ services:
       - .env
     volumes:
       - ./src/log:/home/appuser/app/log
+      - ./src:/app # 開発用にソースコード全体をマウント
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -36,8 +37,12 @@ services:
       dockerfile: containers/app/Dockerfile
     env_file:
       - .env
-    working_dir: /app/alembic
-    command: sh -c "alembic upgrade head"
+    working_dir: /app
+    command: sh -c "alembic -c /app/alembic/alembic.ini upgrade head"
+    volumes:
+      - ./src/alembic:/app/alembic
+      - ./src/models.py:/app/models.py
+      - ./src/database.py:/app/database.py
     depends_on:
       db:
         condition: service_healthy
