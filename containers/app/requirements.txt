@@ -1,0 +1,19 @@
+# Discord Bot
+discord.py
+
+# PostgreSQL Adapter
+psycopg2-binary
+
+# ORM and Migration
+SQLAlchemy
+alembic
+
+# Environment variables
+python-dotenv
+
+# Cryptography
+cryptography
+
+# NanoID for anonymous IDs
+nanoid
+pytz

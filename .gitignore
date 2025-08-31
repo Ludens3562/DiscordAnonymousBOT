@@ -1,0 +1,22 @@
+# Logs
+log/
+
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# Docker
+.dockerignore
+docker-compose.override.yml
