@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 実際の実行環境となるステージ
 FROM python:3.11-slim
 
+# gosuをインストール
+RUN apt-get update && apt-get install -y gosu && rm -rf /var/lib/apt/lists/*
+
 # 非rootユーザーを作成
 RUN useradd --create-home appuser
 WORKDIR /home/appuser/app
@@ -26,12 +29,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # アプリケーションコードをコピー
 # .dockerignoreを使用して不要なファイルを除外することを推奨
 COPY src/ .
+COPY containers/app/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# logディレクトリを作成し、作業ディレクトリ全体の所有権をappuserに変更
-RUN mkdir -p log && chown -R appuser:appuser /home/appuser/app
+# logディレクトリを作成
+RUN mkdir -p log
 
-# ユーザーを切り替え
-USER appuser
+ENTRYPOINT ["entrypoint.sh"]
 
 # BOTを実行
 CMD ["python", "bot.py"]
