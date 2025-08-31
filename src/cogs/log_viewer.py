@@ -1,6 +1,7 @@
 import discord
 import logging
 import os
+import io
 from discord.ext import commands, tasks
 from discord import app_commands
 import datetime
@@ -71,15 +72,12 @@ class LogViewer(commands.Cog):
             for log in logs:
                 log_content += f"[{log.created_at.strftime('%Y-%m-%d %H:%M:%S')}] [{log.level}] {log.logger_name}: {log.message}\n"
 
-            with open("bot_logs.txt", "w", encoding="utf-8") as f:
-                f.write(log_content)
-            
-            await interaction.followup.send(file=discord.File("bot_logs.txt"), ephemeral=True)
+            log_file = io.BytesIO(log_content.encode('utf-8'))
+            timestamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            await interaction.followup.send(file=discord.File(log_file, filename=f"bot_logs_{timestamp}.txt"), ephemeral=True)
 
         finally:
             db.close()
-            if os.path.exists("bot_logs.txt"):
-                os.remove("bot_logs.txt")
 
 
 async def setup(bot):
