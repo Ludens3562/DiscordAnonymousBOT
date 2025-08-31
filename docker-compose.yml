@@ -36,7 +36,7 @@ services:
       dockerfile: containers/app/Dockerfile
     env_file:
       - .env
-    working_dir: /home/appuser/app/alembic
+    working_dir: /app/alembic
     command: sh -c "alembic upgrade head"
     depends_on:
       db:
