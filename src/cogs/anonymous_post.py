@@ -549,7 +549,7 @@ class AnonymousPostCog(commands.Cog):
             search_tag = encryptor.sign_search_tag(daily_user_id_signature, user_id, guild_salt)
 
             if self.is_banned(db, guild_id, user_id):
-                await interaction.followup.send("❌ あなたはこのサーバーまたはBOTからBANされています。", ephemeral=True)
+                await interaction.followup.send("❌ あなたは匿名チャットからBANされています。", ephemeral=True)
                 return
 
             if self.check_rate_limit(db, guild_id, daily_user_id_signature, settings):
@@ -648,6 +648,34 @@ class AnonymousPostCog(commands.Cog):
                     # 削除されたメッセージのチャンネルと実行者のターゲットが一致するかで判断
                     if entry.extra.channel.id == message.channel.id and entry.target.id == self.bot.user.id:
                         deleter = entry.user
+                        deleter = entry.user
+                        break
+                
+                post.deleted_at = discord.utils.utcnow()
+                if deleter:
+                    post.deleted_by = str(deleter.id)
+                else:
+                    # 監査ログで追えない場合は、投稿者自身が削除したとみなし、暗号化IDを保存
+                    post.deleted_by = post.user_id_encrypted
+
+                db.commit()
+
+                log_embed = discord.Embed(title="匿名投稿削除 (外部)", color=0x7289da, timestamp=discord.utils.utcnow())
+                log_embed.add_field(name="匿名ID", value=post.anonymous_id, inline=False)
+                log_embed.add_field(name="対象メッセージID", value=message.id, inline=False)
+                log_embed.add_field(name="チャンネル", value=message.channel.mention, inline=False)
+                if deleter:
+                    log_embed.add_field(name="削除実行者", value=deleter.mention, inline=False)
+                else:
+                    log_embed.add_field(name="削除実行者", value="不明 (投稿者本人による削除の可能性)", inline=False)
+                
+                await self._send_log_message(str(message.guild.id), log_embed)
+
+        except Exception as e:
+            logger.error(f"Error in on_message_delete event: {e}", exc_info=True)
+            db.rollback()
+        finally:
+            db.close()
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread: discord.Thread):
@@ -681,7 +709,7 @@ class AnonymousPostCog(commands.Cog):
                 if deleter:
                     post.deleted_by = str(deleter.id)
                 else:
-                    # 監査ログで追えない場合は、投稿者自身が削除したとみなし、暗号化IDを保存
+                    # 監査ログで追えない場合は、投稿者本人が削除したとみなし、暗号化IDを保存
                     post.deleted_by = post.user_id_encrypted
 
                 db.commit()
@@ -702,34 +730,6 @@ class AnonymousPostCog(commands.Cog):
             db.rollback()
         finally:
             db.close()
-                        break
-                
-                post.deleted_at = discord.utils.utcnow()
-                if deleter:
-                    post.deleted_by = str(deleter.id)
-                else:
-                    # 監査ログで追えない場合は、投稿者自身が削除したとみなし、暗号化IDを保存
-                    post.deleted_by = post.user_id_encrypted
-
-                db.commit()
-
-                log_embed = discord.Embed(title="匿名投稿削除 (外部)", color=0x7289da, timestamp=discord.utils.utcnow())
-                log_embed.add_field(name="匿名ID", value=post.anonymous_id, inline=False)
-                log_embed.add_field(name="対象メッセージID", value=message.id, inline=False)
-                log_embed.add_field(name="チャンネル", value=message.channel.mention, inline=False)
-                if deleter:
-                    log_embed.add_field(name="削除実行者", value=deleter.mention, inline=False)
-                else:
-                    log_embed.add_field(name="削除実行者", value="不明 (投稿者本人による削除の可能性)", inline=False)
-                
-                await self._send_log_message(str(message.guild.id), log_embed)
-
-        except Exception as e:
-            logger.error(f"Error in on_message_delete event: {e}", exc_info=True)
-            db.rollback()
-        finally:
-            db.close()
-
     @app_commands.command(name="forum_post", description="指定したフォーラムに匿名で新しい投稿を作成します。")
     @app_commands.describe(
         forum="投稿先のフォーラムチャンネル",
@@ -755,7 +755,7 @@ class AnonymousPostCog(commands.Cog):
             search_tag = encryptor.sign_search_tag(daily_user_id_signature, user_id, guild_salt)
 
             if self.is_banned(db, guild_id, user_id):
-                await interaction.followup.send("❌ あなたはこのサーバーまたはBOTからBANされています。", ephemeral=True)
+                await interaction.followup.send("❌ あなたは匿名チャットからBANされています。", ephemeral=True)
                 return
 
             if self.check_rate_limit(db, guild_id, daily_user_id_signature, settings):

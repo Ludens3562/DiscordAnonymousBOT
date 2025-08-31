@@ -47,7 +47,7 @@ class ConversionView(discord.ui.View):
                 await self.confirmation_message.delete()
         except ValueError as e:
             error_messages = {
-                "Banned user": "❌ あなたはこのサーバーまたはBOTからBANされています。",
+                "Banned user": "❌ あなたは匿名チャットからBANされています。",
                 "Rate limit exceeded": "❌ レート制限に達しました。しばらくしてから再試行してください。",
                 "NG word detected": "❌ メッセージに不適切な単語が含まれているため、変換をブロックしました。",
             }
