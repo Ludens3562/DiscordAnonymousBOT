@@ -12,25 +12,13 @@ from sqlalchemy.orm import Session
 
 from cogs.config import ConfigCog
 from database import get_db
-from models import (
-    AdminCommandLog,
-    AnonIdMapping,
-    AnonymousPost,
-    AnonymousThread,
-    BotBannedUser,
-    GuildBannedUser,
-    NgWord,
-    RateLimit,
-    UserCommandLog,
-)
+from models import AdminCommandLog, AnonIdMapping, AnonymousPost, AnonymousThread, BotBannedUser, GuildBannedUser, NgWord, RateLimit, UserCommandLog
 from utils.crypto import Encryptor
 
 logger = logging.getLogger(__name__)
 
 # Encryptorのインスタンス化
 encryptor = Encryptor()
-
-
 
 
 class AnonymousPostCog(commands.Cog):
@@ -456,7 +444,7 @@ class AnonymousPostCog(commands.Cog):
             daily_user_id_signature_check = encryptor.sign_daily_user_id(user_id, guild_salt, post_date)
 
             is_author = post_to_delete.daily_user_id_signature == daily_user_id_signature_check
-            is_admin = interaction.user.guild_permissions.manage_guild
+            is_admin = interaction.user.guild_permissions.manage_messages
 
             if not is_author and not is_admin:
                 await interaction.followup.send("❌ この投稿を削除する権限がありません。", ephemeral=True)
@@ -513,7 +501,7 @@ class AnonymousPostCog(commands.Cog):
                 await interaction.followup.send("❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
         finally:
             # 管理者でない（＝投稿者本人）の場合のログを記録
-            if post_to_delete and not interaction.user.guild_permissions.manage_guild:
+            if post_to_delete and not interaction.user.guild_permissions.manage_messages:
                 db.add(UserCommandLog(
                     guild_id=str(interaction.guild.id),
                     command_name='delete',

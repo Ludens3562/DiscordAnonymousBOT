@@ -13,7 +13,7 @@ class DatabaseLogHandler(logging.Handler):
             log_entry = BotLog(
                 logger_name=record.name,
                 level=record.levelname,
-                message=self.format(record)
+                message=record.getMessage()
             )
             db.add(log_entry)
             db.commit()

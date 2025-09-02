@@ -207,7 +207,7 @@ class ModerationCog(commands.Cog):
 
     @app_commands.command(name="ban", description="ユーザーをこのサーバーの匿名投稿からBANします。")
     @app_commands.describe(user="BAN対象のユーザー", global_ban="BOT全体からBANするかどうか (デフォルト: False)")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions(ban_members=True)
     async def ban(self, interaction: discord.Interaction, user: discord.User, global_ban: bool = False):
         await interaction.response.defer(ephemeral=True)
         db: Session = next(get_db())
@@ -267,7 +267,7 @@ class ModerationCog(commands.Cog):
 
     @app_commands.command(name="unban", description="ユーザーの匿名投稿BANを解除します。")
     @app_commands.describe(user="BAN解除対象のユーザー", global_unban="グローバルBANを解除するかどうか (デフォルト: False)")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions(ban_members=True)
     async def unban(self, interaction: discord.Interaction, user: discord.User, global_unban: bool = False):
         await interaction.response.defer(ephemeral=True)
         db: Session = next(get_db())
@@ -323,7 +323,7 @@ class ModerationCog(commands.Cog):
 
     @app_commands.command(name="trace", description="メッセージIDから投稿者を特定します。")
     @app_commands.describe(message_id="特定したい匿名投稿のメッセージID")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions(view_audit_log=True)
     async def trace(self, interaction: discord.Interaction, message_id: str):
         await interaction.response.defer(ephemeral=True)
         db: Session = next(get_db())
@@ -395,7 +395,7 @@ class ModerationCog(commands.Cog):
         days="検索する日数（1-90、デフォルト30）",
         deleted_status="削除済みメッセージの扱い"
     )
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions(view_audit_log=True)
     async def user_posts(self, interaction: discord.Interaction, user: discord.User, days: int = 30, deleted_status: DeletedStatus = DeletedStatus.exclude_deleted):
         await interaction.response.defer(ephemeral=True)
         db: Session = next(get_db())
@@ -425,7 +425,7 @@ class ModerationCog(commands.Cog):
             elif deleted_status == DeletedStatus.exclude_deleted:
                 query = query.filter(AnonymousPost.deleted_at.is_(None))
 
-            posts_in_period = query.order_by(AnonymousPost.created_at.desc()).all()
+            posts_in_period = query.order_by(AnonymousPost.created_at.asc()).all()
 
             user_posts_found = []
             for post in posts_in_period:
@@ -626,7 +626,7 @@ class ModerationCog(commands.Cog):
                 query = query.filter(AdminCommandLog.target_user_id == encrypted_target_id)
 
             total_logs = query.count()
-            logs = query.order_by(AdminCommandLog.created_at.desc()).all()
+            logs = query.order_by(AdminCommandLog.created_at.asc()).all()
 
             if not logs:
                 await interaction.followup.send("ℹ️ 指定された条件のログは見つかりませんでした。", ephemeral=True)

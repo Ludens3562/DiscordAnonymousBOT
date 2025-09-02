@@ -52,6 +52,14 @@ async def on_ready():
         except Exception as e:
             logger.error(f"Failed to sync commands to guild {guild_id}: {e}")
 
+@bot.event
+async def on_command_error(ctx, error):
+    """コマンドエラー時のイベント"""
+    if isinstance(error, commands.CommandNotFound):
+        return  # CommandNotFoundエラーは無視する
+    # その他のエラーはログに出力
+    logger.error(f"Ignoring exception in command {ctx.command}:", exc_info=error)
+
 
 # Botの実行
 if __name__ == "__main__":

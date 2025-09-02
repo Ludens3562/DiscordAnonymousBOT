@@ -5,6 +5,7 @@ import io
 from discord.ext import commands, tasks
 from discord import app_commands
 import datetime
+import pytz
 from database import SessionLocal
 from models import BotLog
 from sqlalchemy import desc
@@ -38,6 +39,7 @@ class LogViewer(commands.Cog):
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="view_bot_logs", description="BOTのログを表示します。")
+    @app_commands.default_permissions(manage_guild=True)
     @app_commands.describe(
         level="ログレベル (INFO, WARNING, ERROR, CRITICAL)",
         days="表示する日数 (1-30)",
@@ -60,7 +62,7 @@ class LogViewer(commands.Cog):
                 start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
                 query = query.filter(BotLog.created_at >= start_date)
 
-            query = query.order_by(desc(BotLog.created_at)).limit(limit)
+            query = query.order_by(BotLog.created_at.asc()).limit(limit)
 
             logs = query.all()
 
@@ -70,7 +72,8 @@ class LogViewer(commands.Cog):
 
             log_content = ""
             for log in logs:
-                log_content += f"[{log.created_at.strftime('%Y-%m-%d %H:%M:%S')}] [{log.level}] {log.logger_name}: {log.message}\n"
+                jst_time = log.created_at.astimezone(pytz.timezone('Asia/Tokyo'))
+                log_content += f"[{jst_time.strftime('%Y-%m-%d %H:%M:%S')}] [{log.level:<8}] {log.logger_name}: {log.message}\n"
 
             log_file = io.BytesIO(log_content.encode('utf-8'))
             timestamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')

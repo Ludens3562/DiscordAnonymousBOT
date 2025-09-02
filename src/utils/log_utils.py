@@ -2,6 +2,7 @@ import os
 import datetime
 import shutil
 import logging
+import pytz
 from logging.handlers import TimedRotatingFileHandler
 from .db_log_handler import DatabaseLogHandler
 
@@ -12,6 +13,14 @@ ARCHIVE_DIR = os.path.join(LOG_DIR, 'archive')
 NLOG_FILE = os.path.join(LOG_DIR, 'NLOG.log')
 ELOG_FILE = os.path.join(LOG_DIR, 'ELOG.log')
 
+class JSTFormatter(logging.Formatter):
+    """タイムゾーンをJSTに設定したFormatter"""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.datetime.fromtimestamp(record.created, pytz.timezone('Asia/Tokyo'))
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            return dt.isoformat()
 
 def setup_logging():
     """ロガーの初期設定を行う"""
@@ -21,7 +30,7 @@ def setup_logging():
         os.makedirs(ARCHIVE_DIR)
 
     dt_fmt = '%Y-%m-%d %H:%M:%S'
-    formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
+    formatter = JSTFormatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
 
     # 通常ログ (NLOG)
     nlog_handler = TimedRotatingFileHandler(

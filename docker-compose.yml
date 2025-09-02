@@ -19,6 +19,8 @@ services:
     image: postgres:15
     env_file:
       - .env
+    environment:
+      - TZ=Asia/Tokyo
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # 外部からデータベースに直接アクセスする必要がない場合は、以下のportsセクションをコメントアウトまたは削除してください
