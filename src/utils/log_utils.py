@@ -44,8 +44,20 @@ def setup_logging():
     nlog_handler.addFilter(lambda record: record.levelno == logging.INFO)
     
     # アーカイブファイル名のカスタマイズ
-    def namer(name):
-        return os.path.join(ARCHIVE_DIR, datetime.date.today().strftime('%Y%m%d') + "_" + os.path.basename(name).replace(".log", "") + ".log")
+    # アーカイブファイル名のカスタマイズ
+    def namer(default_name):
+        """
+        ローテーションされるログファイルの名前をカスタマイズする。
+        例: '.../NLOG.log.2025-09-06' -> '.../archive/20250906_NLOG.log'
+        """
+        try:
+            base_filename = os.path.basename(default_name)
+            parts = base_filename.split('.')
+            log_name = parts[0]
+            date_str = parts[2].replace('-', '')
+            return os.path.join(ARCHIVE_DIR, f"{date_str}_{log_name}.log")
+        except (IndexError, AttributeError):
+            return default_name + ".archived"
     nlog_handler.namer = namer
 
     # エラーログ (ELOG)
@@ -57,11 +69,16 @@ def setup_logging():
     )
     elog_handler.setFormatter(formatter)
     elog_handler.setLevel(logging.ERROR)
+    elog_handler.addFilter(lambda record: record.levelno >= logging.ERROR)
     elog_handler.namer = namer
-
     # DBログハンドラ
     db_handler = DatabaseLogHandler()
     db_handler.setLevel(logging.INFO)
 
+    # コンソール出力用のハンドラ
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
     # ルートロガーにハンドラを追加
-    logging.basicConfig(level=logging.INFO, handlers=[nlog_handler, elog_handler, db_handler])
+    logging.basicConfig(level=logging.INFO, handlers=[nlog_handler, elog_handler, db_handler, console_handler])

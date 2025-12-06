@@ -128,7 +128,7 @@ class ConfigCog(commands.Cog):
                     elif value in [None, ""]:
                         display_value = "未設定"
 
-                    embed.add_field(name=description, value=f"`{display_value}`", inline=False)
+                    embed.add_field(name=key, value=f"**{description}**\n`{display_value}`", inline=False)
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 

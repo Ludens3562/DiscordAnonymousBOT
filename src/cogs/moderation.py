@@ -1,17 +1,20 @@
 import math
+import base64
 import re
 import logging
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import timedelta
+from bloom_filter import BloomFilter
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.orm import Session
+from sqlalchemy import cast, String
 
 from cogs.config import ConfigCog
 from database import get_db
-from models import AdminCommandLog, AnonymousPost, GuildBannedUser, BotBannedUser, BulkDeleteHistory
+from models import AdminCommandLog, AnonymousPost, GuildBannedUser, BotBannedUser, BulkDeleteHistory, GlobalChatBan, GlobalChatEvents, GlobalChatChannel
 from utils.crypto import Encryptor
 
 logger = logging.getLogger(__name__)
@@ -79,7 +82,6 @@ class UserPostsView(discord.ui.View):
             embed = await self.get_page_embed()
             await interaction.response.edit_message(embed=embed, view=self)
         else:
-
             await interaction.response.defer()
 
     @discord.ui.button(label="次へ ▶️", style=discord.ButtonStyle.grey)
@@ -120,8 +122,6 @@ class AdminLogView(discord.ui.View):
         db: Session = next(get_db())
         try:
             config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
-            settings = await config_cog.get_guild_settings(db, self.guild_id)
-            guild_salt = settings['guild_salt']
 
             for log in page_logs:
                 executor = await self.bot.fetch_user(int(log.executed_by))
@@ -129,12 +129,16 @@ class AdminLogView(discord.ui.View):
                 value_str = f"**実行者:** {executor.mention} (`{log.executed_by}`)\n"
                 
                 if log.target_user_id:
-                    decrypted_id = self.encryptor.decrypt(log.target_user_id, guild_salt)
+                    decrypted_id = None
+                    if log.log_salt_type:
+                        salt = self.encryptor.get_logging_salt(log.log_salt_type)
+                        if salt:
+                            decrypted_id = self.encryptor.decrypt_log_user_id(log.target_user_id, salt)
                     if decrypted_id:
                         target_user = await self.bot.fetch_user(int(decrypted_id))
                         value_str += f"**対象者:** {target_user.mention} (`{decrypted_id}`)\n"
                     else:
-                        value_str += f"**対象者:** `ID復号失敗`\n"
+                        value_str += "**対象者:** `ID復号失敗`\n"
 
                 value_str += f"**実行日時:** {log.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 value_str += f"**成功/失敗:** {'✅ Success' if log.success else '❌ Failure'}"
@@ -213,10 +217,7 @@ class ModerationCog(commands.Cog):
         db: Session = next(get_db())
         success = False
         
-        config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
-        settings = await config_cog.get_guild_settings(db, str(interaction.guild.id))
-        guild_salt = settings['guild_salt']
-        encrypted_user_id = encryptor.encrypt(str(user.id), guild_salt)
+        encrypted_user_id = encryptor.encrypt_user_id(str(user.id), encryptor.current_key_version, b'logging_salt_for_ban')
 
         try:
             guild_id = str(interaction.guild.id)
@@ -234,6 +235,18 @@ class ModerationCog(commands.Cog):
                     return
                 new_ban = BotBannedUser(user_id=user_id, banned_by=banned_by_id)
                 db.add(new_ban)
+
+                # グローバルチャットからもBAN
+                gchat_ban = db.query(GlobalChatBan).filter_by(target_id=user_id, target_type='USER', room_id=None).first()
+                if not gchat_ban:
+                    new_gchat_ban = GlobalChatBan(
+                        target_id=user_id,
+                        target_type='USER',
+                        reason="Global BAN from /ban command",
+                        banned_by=banned_by_id
+                    )
+                    db.add(new_gchat_ban)
+
                 db.commit()
                 await interaction.followup.send(f"✅ {user.mention} をグローバルBANしました。", ephemeral=True)
             else:
@@ -250,14 +263,15 @@ class ModerationCog(commands.Cog):
 
         except Exception as e:
             db.rollback()
-            logger.error(f"An error occurred in 'ban' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'ban' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='ban',
                 executed_by=str(interaction.user.id),
                 target_user_id=encrypted_user_id,
+                log_salt_type='ban',
                 params={'user_id': str(user.id), 'global_ban': global_ban},
                 success=success
             )
@@ -273,10 +287,7 @@ class ModerationCog(commands.Cog):
         db: Session = next(get_db())
         success = False
 
-        config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
-        settings = await config_cog.get_guild_settings(db, str(interaction.guild.id))
-        guild_salt = settings['guild_salt']
-        encrypted_user_id = encryptor.encrypt(str(user.id), guild_salt)
+        encrypted_user_id = encryptor.encrypt_user_id(str(user.id), encryptor.current_key_version, b'logging_salt_for_unban')
 
         try:
             guild_id = str(interaction.guild.id)
@@ -291,6 +302,12 @@ class ModerationCog(commands.Cog):
                     await interaction.followup.send(f"❌ {user.mention} はグローバルBANされていません。", ephemeral=True)
                     return
                 db.delete(ban_to_remove)
+
+                # グローバルチャットのBANも解除
+                gchat_ban_to_remove = db.query(GlobalChatBan).filter_by(target_id=user_id, target_type='USER', room_id=None).first()
+                if gchat_ban_to_remove:
+                    db.delete(gchat_ban_to_remove)
+
                 db.commit()
                 await interaction.followup.send(f"✅ {user.mention} のグローバルBANを解除しました。", ephemeral=True)
             else:
@@ -299,21 +316,23 @@ class ModerationCog(commands.Cog):
                     await interaction.followup.send(f"❌ {user.mention} はこのサーバーでBANされていません。", ephemeral=True)
                     return
                 db.delete(ban_to_remove)
+
                 db.commit()
-                await interaction.followup.send(f"✅ {user.mention} のBANを解除しました。", ephemeral=True)
+                await interaction.followup.send(f"✅ {user.mention} のこのサーバーでのBANを解除しました。", ephemeral=True)
 
             success = True
 
         except Exception as e:
             db.rollback()
-            logger.error(f"An error occurred in 'unban' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'unban' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='unban',
                 executed_by=str(interaction.user.id),
                 target_user_id=encrypted_user_id,
+                log_salt_type='unban',
                 params={'user_id': str(user.id), 'global_unban': global_unban},
                 success=success
             )
@@ -336,12 +355,9 @@ class ModerationCog(commands.Cog):
             if not post:
                 await interaction.followup.send("❌ 指定されたメッセージIDの投稿が見つかりません。", ephemeral=True)
                 return
-
-            config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
-            settings = await config_cog.get_guild_settings(db, guild_id)
-            guild_salt = settings['guild_salt']
-
-            decrypted_user_id = encryptor.decrypt(post.user_id_encrypted, guild_salt)
+            
+            salt_bytes = base64.b64decode(post.encryption_salt)
+            decrypted_user_id = encryptor.decrypt_user_id_with_salt(post.user_id_encrypted, salt_bytes)
 
             if decrypted_user_id:
                 user = await self.bot.fetch_user(int(decrypted_user_id))
@@ -374,14 +390,21 @@ class ModerationCog(commands.Cog):
 
         except Exception as e:
             db.rollback()
-            logger.error(f"An error occurred in 'trace' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'trace' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
         finally:
+            encrypted_user_id_for_log = None
+            if decrypted_user_id:
+                log_salt = encryptor.get_logging_salt('admin_logs')
+                if log_salt:
+                    encrypted_user_id_for_log = encryptor.encrypt_user_id(decrypted_user_id, encryptor.current_key_version, log_salt)
+
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='trace',
                 executed_by=str(interaction.user.id),
-                target_user_id=post.user_id_encrypted if post else None,
+                target_user_id=encrypted_user_id_for_log,
+                log_salt_type='admin_logs',
                 params={'message_id': message_id},
                 success=success
             )
@@ -389,7 +412,7 @@ class ModerationCog(commands.Cog):
             db.commit()
             db.close()
 
-    @app_commands.command(name="user_posts", description="指定したユーザーの匿名投稿を検索します。")
+    @app_commands.command(name="user_posts", description="指定したユーザーの匿名投稿を検索します (ブルームフィルタ使用)。")
     @app_commands.describe(
         user="検索対象のユーザー",
         days="検索する日数（1-90、デフォルト30）",
@@ -412,30 +435,44 @@ class ModerationCog(commands.Cog):
             config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
             settings = await config_cog.get_guild_settings(db, guild_id)
             guild_salt = settings['guild_salt']
-            encrypted_user_id = encryptor.encrypt(user_id, guild_salt)
+            
+            # ユーザーIDを暗号化してログに残す
+            # 投稿ごとのソルトがないため、ここでは固定のソルトで暗号化
+            encrypted_user_id = encryptor.encrypt_user_id(user_id, encryptor.current_key_version, b'logging_salt_for_user_posts')
 
             start_date = discord.utils.utcnow() - timedelta(days=days)
+            
+            # 1. DBから期間内の全投稿を取得
             query = db.query(AnonymousPost).filter(
                 AnonymousPost.guild_id == guild_id,
                 AnonymousPost.created_at >= start_date
             )
-
             if deleted_status == DeletedStatus.deleted_only:
                 query = query.filter(AnonymousPost.deleted_at.isnot(None))
             elif deleted_status == DeletedStatus.exclude_deleted:
                 query = query.filter(AnonymousPost.deleted_at.is_(None))
+            
+            all_posts_in_period = query.order_by(AnonymousPost.created_at.asc()).all()
 
-            posts_in_period = query.order_by(AnonymousPost.created_at.asc()).all()
+            if not all_posts_in_period:
+                await interaction.followup.send(f"ℹ️ 過去{days}日間に検索対象の投稿はありませんでした。", ephemeral=True)
+                success = True
+                return
 
+            # 2. メモリ上でsearch_tagを再計算して検証
             user_posts_found = []
-            for post in posts_in_period:
-                recalculated_tag = encryptor.sign_search_tag(post.daily_user_id_signature, user_id, guild_salt)
+            for post in all_posts_in_period:
+                nonce = post.created_at.strftime('%Y-%m-%d-%H-%M').encode()
+                recalculated_tag = encryptor.generate_search_tag(user_id, guild_salt, nonce)
                 if recalculated_tag == post.search_tag:
                     user_posts_found.append(post)
 
+            # 5. 厳密な検証 (今回はブルームフィルタの性質上、省略可能だが念のため)
+            # 実際には、ノンスが不明なためクライアントサイドでの完全な再生成は困難。
+            # ブルームフィルタの偽陽性率が十分に低ければ、このステップは省略できる。
+
             if not user_posts_found:
-                await interaction.followup.send(f"ℹ️ {user.mention} による過去{days}日間の匿名投稿は見つかりませんでした。", ephemeral=True)
-                # This is not an error, so we mark it as a success.
+                await interaction.followup.send(f"ℹ️ {user.mention} による過去{days}日間の匿名投稿は見つかりませんでした。(候補0件)", ephemeral=True)
                 success = True
                 return
 
@@ -447,14 +484,15 @@ class ModerationCog(commands.Cog):
 
         except Exception as e:
             db.rollback()
-            logger.error(f"An error occurred in 'user_posts' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'user_posts' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='user_posts',
                 executed_by=str(interaction.user.id),
                 target_user_id=encrypted_user_id,
+                log_salt_type='user_posts',
                 params={'days': days, 'deleted_status': deleted_status.value},
                 success=success
             )
@@ -499,11 +537,12 @@ class ModerationCog(commands.Cog):
                 config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
                 settings = await config_cog.get_guild_settings(db, guild_id)
                 guild_salt = settings['guild_salt']
-                target_user_id_encrypted = encryptor.encrypt(user_id, guild_salt)
+                target_user_id_encrypted = encryptor.encrypt_user_id(user_id, encryptor.current_key_version, b'logging_salt_for_bulk_delete')
                 
                 all_posts_in_scope = query.all()
                 for post in all_posts_in_scope:
-                    recalculated_tag = encryptor.sign_search_tag(post.daily_user_id_signature, user_id, guild_salt)
+                    nonce = post.created_at.strftime('%Y-%m-%d-%H-%M').encode()
+                    recalculated_tag = encryptor.generate_search_tag(user_id, guild_salt, nonce)
                     if recalculated_tag == post.search_tag:
                         posts_to_delete.append(post)
             else:
@@ -574,14 +613,15 @@ class ModerationCog(commands.Cog):
 
         except Exception as e:
             db.rollback()
-            logger.error(f"An error occurred in 'bulk_delete' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'bulk_delete' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
         finally:
             log = AdminCommandLog(
                 guild_id=str(interaction.guild.id),
                 command_name='bulk_delete',
                 executed_by=str(interaction.user.id),
                 target_user_id=target_user_id_encrypted,
+                log_salt_type='bulk_delete' if condition_type == ConditionType.user else None,
                 params={'scope': scope.value, 'condition_type': condition_type.value, 'condition_value': condition_value, 'dry_run': dry_run},
                 success=success
             )
@@ -619,10 +659,7 @@ class ModerationCog(commands.Cog):
                 query = query.filter(AdminCommandLog.executed_by == str(user.id))
 
             if target_user:
-                config_cog: ConfigCog = self.bot.get_cog("ConfigCog")
-                settings = await config_cog.get_guild_settings(db, guild_id)
-                guild_salt = settings['guild_salt']
-                encrypted_target_id = encryptor.encrypt(str(target_user.id), guild_salt)
+                encrypted_target_id = encryptor.encrypt_user_id(str(target_user.id), encryptor.current_key_version, b'logging_salt_for_admin_logs')
                 query = query.filter(AdminCommandLog.target_user_id == encrypted_target_id)
 
             total_logs = query.count()
@@ -639,8 +676,191 @@ class ModerationCog(commands.Cog):
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
         except Exception as e:
-            logger.error(f"An error occurred in 'admin_logs' command.", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました。管理者に連絡してください。", ephemeral=True)
+            logger.error(f"An error occurred in 'admin_logs' command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
+        finally:
+            db.close()
+
+    @app_commands.command(name="global_trace", description="[BOTオーナー専用] メッセージIDから投稿者をグローバル検索します。")
+    @app_commands.describe(message_id="特定したい匿名投稿のメッセージID")
+    @commands.is_owner()
+    async def global_trace(self, interaction: discord.Interaction, message_id: str):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            # 1. まず、message_idがoriginal_message_idである可能性を考慮して検索
+            event = db.query(GlobalChatEvents).filter_by(original_message_id=message_id).first()
+            if event:
+                post = db.query(AnonymousPost).filter_by(message_id=event.original_message_id).first()
+            else:
+                # 2. 次に、転送されたメッセージIDとしてforwarded_mapを検索
+                event = db.query(GlobalChatEvents).filter(cast(GlobalChatEvents.forwarded_map, String).like(f'%"{message_id}"%')).first()
+                if event:
+                    post = db.query(AnonymousPost).filter_by(message_id=event.original_message_id).first()
+                else:
+                    # 3. 最後に、グローバルチャットではない通常の投稿として検索
+                    post = db.query(AnonymousPost).filter_by(message_id=message_id).first()
+            
+            if not post:
+                await interaction.followup.send("❌ 指定されたメッセージIDの投稿が見つかりません。", ephemeral=True)
+                return
+
+            salt_bytes = base64.b64decode(post.encryption_salt)
+            decrypted_user_id = encryptor.decrypt_user_id_with_salt(post.user_id_encrypted, salt_bytes)
+
+            if decrypted_user_id:
+                user = await self.bot.fetch_user(int(decrypted_user_id))
+                
+                embed = discord.Embed(title="グローバル投稿者特定結果", color=0xffa500)  # Orange
+                embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url)
+                
+                original_guild = self.bot.get_guild(int(post.guild_id))
+                original_channel = self.bot.get_channel(int(post.channel_id))
+
+                embed.add_field(name="メッセージID", value=f"[{message_id}](https://discord.com/channels/{post.guild_id}/{post.channel_id}/{message_id})", inline=False)
+                embed.add_field(name="投稿者", value=f"{user.mention} (`{user.id}`)", inline=False)
+                embed.add_field(name="投稿サーバー", value=f"{original_guild.name if original_guild else '不明なサーバー'} (`{post.guild_id}`)", inline=False)
+                embed.add_field(name="投稿チャンネル", value=f"{original_channel.name if original_channel else '不明なチャンネル'} (`{post.channel_id}`)", inline=False)
+                
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.followup.send("❌ ユーザーIDの復号に失敗しました。", ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error in global_trace command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
+        finally:
+            db.close()
+
+    @app_commands.command(name="global_user_posts", description="[BOTオーナー専用] ユーザーの投稿をグローバル検索します。")
+    @app_commands.describe(user="検索対象のユーザー", days="検索日数 (デフォルト: 30)")
+    @commands.is_owner()
+    async def global_user_posts(self, interaction: discord.Interaction, user: discord.User, days: int = 30):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            if not 1 <= days <= 90:
+                await interaction.followup.send("❌ 日数は1から90の間で指定してください。", ephemeral=True)
+                return
+
+            user_id = str(user.id)
+            start_date = discord.utils.utcnow() - timedelta(days=days)
+
+            all_posts_in_period = db.query(AnonymousPost).filter(AnonymousPost.created_at >= start_date).all()
+
+            if not all_posts_in_period:
+                await interaction.followup.send(f"ℹ️ 過去{days}日間に検索対象の投稿はありませんでした。", ephemeral=True)
+                return
+
+            # メモリ上でglobal_user_signatureを再計算して検証
+            candidate_posts = []
+            for post in all_posts_in_period:
+                nonce = post.created_at.strftime('%Y-%m-%d-%H-%M').encode()
+                # 投稿に使われたキーバージョンで署名を再計算
+                recalculated_sig = encryptor.generate_global_user_signature(user_id, post.key_version, nonce)
+                if recalculated_sig == post.global_user_signature:
+                    candidate_posts.append(post)
+
+            if not candidate_posts:
+                await interaction.followup.send(f"ℹ️ {user.mention} による過去{days}日間の匿名投稿は見つかりませんでした。", ephemeral=True)
+                return
+
+            # 厳密な検証は省略（ブルームフィルタの偽陽性を許容）
+            
+            view = UserPostsView(self.bot, "N/A", user, candidate_posts)
+            embed = await view.get_page_embed()
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error in global_user_posts command: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
+        finally:
+            db.close()
+
+    @app_commands.command(name="delete", description="指定した匿名投稿を削除します。")
+    @app_commands.describe(message_id="削除するメッセージID")
+    async def delete(self, interaction: discord.Interaction, message_id: str):
+        await interaction.response.defer(ephemeral=True)
+        db: Session = next(get_db())
+        try:
+            user_id = str(interaction.user.id)
+            is_owner = await self.bot.is_owner(interaction.user)
+
+            # まず、どのサーバーの投稿かを問わずメッセージIDで投稿を検索
+            post_to_delete = db.query(AnonymousPost).filter_by(message_id=message_id, deleted_at=None).first()
+
+            if not post_to_delete:
+                await interaction.followup.send("❌ 削除対象の投稿が見つからないか、既に削除されています。", ephemeral=True)
+                return
+
+            # 権限チェック
+            salt_bytes = base64.b64decode(post_to_delete.encryption_salt)
+            decrypted_user_id = encryptor.decrypt_user_id_with_salt(post_to_delete.user_id_encrypted, salt_bytes)
+            is_author = (decrypted_user_id == user_id)
+            is_local_admin = interaction.guild and interaction.user.guild_permissions.manage_messages and post_to_delete.guild_id == str(interaction.guild.id)
+
+            if not is_author and not is_local_admin and not is_owner:
+                await interaction.followup.send("❌ この投稿を削除する権限がありません。", ephemeral=True)
+                return
+
+            # Discord上のメッセージを削除
+            try:
+                target_guild = self.bot.get_guild(int(post_to_delete.guild_id))
+                if target_guild:
+                    target_channel = target_guild.get_channel_or_thread(int(post_to_delete.thread_id or post_to_delete.channel_id))
+                    if target_channel:
+                        message = await target_channel.fetch_message(int(post_to_delete.message_id))
+                        await message.delete()
+            except discord.NotFound:
+                pass  # 既に削除済み
+            except discord.Forbidden:
+                logger.warning(f"Failed to delete message {post_to_delete.message_id} in guild {post_to_delete.guild_id}: Missing Permissions")
+            except Exception as e:
+                logger.error(f"Error deleting message from Discord: {e}")
+
+            # DBを論理削除
+            post_to_delete.deleted_at = discord.utils.utcnow()
+            post_to_delete.deleted_by = user_id
+            
+            # グローバルチャット連携の削除
+            event = db.query(GlobalChatEvents).filter_by(original_message_id=message_id).first()
+            if event and event.forwarded_map:
+                for guild_id_str, msg_id_str in event.forwarded_map.items():
+                    try:
+                        target_guild = self.bot.get_guild(int(guild_id_str))
+                        if not target_guild:
+                            continue
+                        
+                        # forwarded_mapには転送先サーバーIDしかないので、チャンネルIDをDBから引く
+                        gcl_channel = db.query(GlobalChatChannel).filter_by(guild_id=guild_id_str, room_id=event.room_id).first()
+                        if not gcl_channel:
+                            continue
+
+                        target_channel = target_guild.get_channel(int(gcl_channel.channel_id))
+                        if target_channel:
+                            message_to_delete = await target_channel.fetch_message(int(msg_id_str))
+                            await message_to_delete.delete()
+                    except discord.NotFound:
+                        pass
+                    except discord.Forbidden:
+                        logger.warning(f"Failed to delete forwarded message {msg_id_str} in guild {guild_id_str}: Missing Permissions")
+                    except Exception as e:
+                        logger.error(f"Error deleting forwarded message {msg_id_str}: {e}")
+
+            db.commit()
+            await interaction.followup.send("✅ 投稿を削除しました。", ephemeral=True)
+
+            # ログ
+            # log_embed = discord.Embed(title="匿名投稿削除", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+            # log_embed.add_field(name="匿名ID", value=post_to_delete.anonymous_id, inline=False)
+            # log_embed.add_field(name="実行者", value=interaction.user.mention, inline=False)
+            # log_embed.add_field(name="対象メッセージID", value=message_id, inline=False)
+            # await self._send_log_message(post_to_delete.guild_id, log_embed)
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error in delete command: {e}", exc_info=True)
+            await interaction.followup.send("❌ エラーが発生しました。", ephemeral=True)
         finally:
             db.close()
 

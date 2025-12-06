@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     BigInteger,
+    Integer,
     String,
     Text,
     Boolean,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -21,9 +23,11 @@ class AnonymousPost(Base):
 
     id = Column(BigInteger, primary_key=True)
     guild_id = Column(String(30), nullable=False)
-    user_id_encrypted = Column(String(512), nullable=False)
-    daily_user_id_signature = Column(String(128), nullable=False)
-    search_tag = Column(String(128), nullable=False)
+    user_id_encrypted = Column(Text, nullable=False)
+    encryption_salt = Column(Text, nullable=False)
+    global_user_signature = Column(Text, nullable=False)
+    key_version = Column(Integer, nullable=False)
+    search_tag = Column(Text, nullable=False)
     anonymous_id = Column(String(64), nullable=False)
     message_id = Column(String(64), nullable=False)
     channel_id = Column(String(30), nullable=False)
@@ -32,7 +36,7 @@ class AnonymousPost(Base):
     attachment_urls = Column(JSON, default=[])
     is_converted = Column(Boolean, default=False)
     original_message_id = Column(String(64))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False)
     deleted_at = Column(DateTime(timezone=True))
     deleted_by = Column(String(512))
 
@@ -68,6 +72,7 @@ class AdminCommandLog(Base):
     command_name = Column(String(100), nullable=False)
     executed_by = Column(String(64), nullable=False)
     target_user_id = Column(String(512))
+    log_salt_type = Column(String(50))  # e.g., 'ban', 'user_posts'
     channel_id = Column(String(64))
     params = Column(JSON)
     success = Column(Boolean, nullable=False, default=True)
@@ -175,14 +180,8 @@ class RateLimit(Base):
     __tablename__ = 'rate_limits'
 
     id = Column(BigInteger, primary_key=True)
-    guild_id = Column(String(30), nullable=False)
-    user_id_signature = Column(String(128), nullable=False)
-    command_name = Column(String(100), nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        Index('idx_rate_limits_guild_user_command', 'guild_id', 'user_id_signature', 'command_name'),
-    )
+    rate_limit_key = Column(Text, index=True, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class BatchDeleteJob(Base):
@@ -231,8 +230,6 @@ class NgWord(Base):
     )
 
 
-
-
 class BotLog(Base):
     __tablename__ = 'bot_logs'
 
@@ -246,3 +243,80 @@ class BotLog(Base):
         Index('idx_bot_logs_level', 'level'),
         Index('idx_bot_logs_created_at', 'created_at'),
     )
+
+
+class GlobalChatRoom(Base):
+    __tablename__ = 'global_chat_rooms'
+
+    id = Column(BigInteger, primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text)
+    created_by = Column(String(30), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GlobalChatChannel(Base):
+    __tablename__ = 'global_chat_channels'
+
+    channel_id = Column(String(30), primary_key=True)
+    guild_id = Column(String(30), nullable=False)
+    room_id = Column(BigInteger, nullable=False)
+    webhook_url = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_gcr_guild_room', 'guild_id', 'room_id'),
+    )
+
+
+class GlobalChatBan(Base):
+    __tablename__ = 'global_chat_bans'
+
+    id = Column(BigInteger, primary_key=True)
+    target_id = Column(String(30), nullable=False)  # guild_id or user_id
+    target_type = Column(String(20), nullable=False)  # 'GUILD' or 'USER'
+    room_id = Column(BigInteger)  # NULL for global ban
+    reason = Column(Text)
+    banned_by = Column(String(30), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_gcb_target', 'target_id', 'target_type'),
+    )
+
+
+class GlobalNgWord(Base):
+    __tablename__ = 'global_ng_words'
+
+    id = Column(BigInteger, primary_key=True)
+    word = Column(String(255), nullable=False)
+    match_type = Column(String(20), nullable=False, server_default='partial')  # partial, exact, regex
+    added_by = Column(String(30), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('word', 'match_type', name='uq_gng_word_type'),
+    )
+
+
+class GlobalChatEvents(Base):
+    __tablename__ = 'global_chat_events'
+
+    original_message_id = Column(String(64), primary_key=True)
+    user_id_encrypted = Column(Text, nullable=False)
+    forwarded_map = Column(JSONB, nullable=False, server_default='{}')
+    status = Column(String(20), nullable=False, default='PENDING')  # e.g., PENDING, COMPLETED
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_gce_forwarded_map', 'forwarded_map', postgresql_using='gin'),
+    )
+
+
+class GlobalSettings(Base):
+    __tablename__ = 'global_settings'
+
+    key = Column(String(100), primary_key=True)
+    value = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

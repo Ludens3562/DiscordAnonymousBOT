@@ -1,18 +1,18 @@
-"""squashed migrations
+"""Initial schema
 
-Revision ID: 58fbf2eec6bc
+Revision ID: d321d7633315
 Revises: 
-Create Date: 2025-08-31 11:23:59.622948
+Create Date: 2025-09-06 10:24:39.101535
 
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '58fbf2eec6bc'
+revision: str = 'd321d7633315'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -48,9 +48,11 @@ def upgrade() -> None:
     op.create_table('anonymous_posts',
     sa.Column('id', sa.BigInteger(), nullable=False),
     sa.Column('guild_id', sa.String(length=30), nullable=False),
-    sa.Column('user_id_encrypted', sa.String(length=512), nullable=False),
-    sa.Column('daily_user_id_signature', sa.String(length=128), nullable=False),
-    sa.Column('search_tag', sa.String(length=128), nullable=False),
+    sa.Column('user_id_encrypted', sa.Text(), nullable=False),
+    sa.Column('encryption_salt', sa.Text(), nullable=False),
+    sa.Column('global_user_signature', sa.Text(), nullable=False),
+    sa.Column('key_version', sa.Integer(), nullable=False),
+    sa.Column('search_tag', sa.Text(), nullable=False),
     sa.Column('anonymous_id', sa.String(length=64), nullable=False),
     sa.Column('message_id', sa.String(length=64), nullable=False),
     sa.Column('channel_id', sa.String(length=30), nullable=False),
@@ -61,7 +63,7 @@ def upgrade() -> None:
     sa.Column('original_message_id', sa.String(length=64), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('deleted_by', sa.String(length=30), nullable=True),
+    sa.Column('deleted_by', sa.String(length=512), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('idx_anonymous_posts_anon_id', 'anonymous_posts', ['anonymous_id'], unique=False)
@@ -143,6 +145,60 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('idx_conversion_history_guild', 'conversion_history', ['guild_id'], unique=False)
+    op.create_table('global_chat_bans',
+    sa.Column('id', sa.BigInteger(), nullable=False),
+    sa.Column('target_id', sa.String(length=30), nullable=False),
+    sa.Column('target_type', sa.String(length=20), nullable=False),
+    sa.Column('room_id', sa.BigInteger(), nullable=True),
+    sa.Column('reason', sa.Text(), nullable=True),
+    sa.Column('banned_by', sa.String(length=30), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('idx_gcb_target', 'global_chat_bans', ['target_id', 'target_type'], unique=False)
+    op.create_table('global_chat_channels',
+    sa.Column('channel_id', sa.String(length=30), nullable=False),
+    sa.Column('guild_id', sa.String(length=30), nullable=False),
+    sa.Column('room_id', sa.BigInteger(), nullable=False),
+    sa.Column('webhook_url', sa.String(length=255), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('channel_id')
+    )
+    op.create_index('idx_gcr_guild_room', 'global_chat_channels', ['guild_id', 'room_id'], unique=False)
+    op.create_table('global_chat_events',
+    sa.Column('original_message_id', sa.String(length=64), nullable=False),
+    sa.Column('user_id_encrypted', sa.Text(), nullable=False),
+    sa.Column('forwarded_map', postgresql.JSONB(astext_type=sa.Text()), server_default='{}', nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('original_message_id')
+    )
+    op.create_index('idx_gce_forwarded_map', 'global_chat_events', ['forwarded_map'], unique=False, postgresql_using='gin')
+    op.create_table('global_chat_rooms',
+    sa.Column('id', sa.BigInteger(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.String(length=30), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name')
+    )
+    op.create_table('global_ng_words',
+    sa.Column('id', sa.BigInteger(), nullable=False),
+    sa.Column('word', sa.String(length=255), nullable=False),
+    sa.Column('match_type', sa.String(length=20), server_default='partial', nullable=False),
+    sa.Column('added_by', sa.String(length=30), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('word', 'match_type', name='uq_gng_word_type')
+    )
+    op.create_table('global_settings',
+    sa.Column('key', sa.String(length=100), nullable=False),
+    sa.Column('value', sa.JSON(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.PrimaryKeyConstraint('key')
+    )
     op.create_table('guild_banned_users',
     sa.Column('guild_id', sa.String(length=30), nullable=False),
     sa.Column('user_id', sa.String(length=30), nullable=False),
@@ -161,27 +217,28 @@ def upgrade() -> None:
     sa.Column('id', sa.BigInteger(), nullable=False),
     sa.Column('guild_id', sa.String(length=30), nullable=False),
     sa.Column('word', sa.String(length=255), nullable=False),
+    sa.Column('match_type', sa.String(length=20), server_default='partial', nullable=False),
     sa.Column('action', sa.String(length=20), nullable=False),
     sa.Column('added_by', sa.String(length=30), nullable=True),
     sa.Column('added_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('guild_id', 'word', name='uq_ng_word_guild_word')
+    sa.UniqueConstraint('guild_id', 'word', 'match_type', name='uq_ng_word_guild_word_type')
     )
     op.create_table('rate_limits',
     sa.Column('id', sa.BigInteger(), nullable=False),
-    sa.Column('guild_id', sa.String(length=30), nullable=False),
-    sa.Column('user_id_signature', sa.String(length=128), nullable=False),
-    sa.Column('command_name', sa.String(length=100), nullable=False),
+    sa.Column('rate_limit_key', sa.Text(), nullable=False),
     sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('idx_rate_limits_guild_user_command', 'rate_limits', ['guild_id', 'user_id_signature', 'command_name'], unique=False)
+    op.create_index(op.f('ix_rate_limits_rate_limit_key'), 'rate_limits', ['rate_limit_key'], unique=False)
+    op.create_index(op.f('ix_rate_limits_timestamp'), 'rate_limits', ['timestamp'], unique=False)
     op.create_table('user_command_logs',
     sa.Column('id', sa.BigInteger(), nullable=False),
     sa.Column('guild_id', sa.String(length=30), nullable=False),
     sa.Column('command_name', sa.String(length=100), nullable=False),
     sa.Column('executed_by_signature', sa.String(length=128), nullable=False),
     sa.Column('params', sa.JSON(), nullable=True),
+    sa.Column('success', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -194,11 +251,21 @@ def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index('idx_user_logs_guild_time', table_name='user_command_logs', postgresql_using='btree', postgresql_ops={'created_at': 'DESC'})
     op.drop_table('user_command_logs')
-    op.drop_index('idx_rate_limits_guild_user_command', table_name='rate_limits')
+    op.drop_index(op.f('ix_rate_limits_timestamp'), table_name='rate_limits')
+    op.drop_index(op.f('ix_rate_limits_rate_limit_key'), table_name='rate_limits')
     op.drop_table('rate_limits')
     op.drop_table('ng_words')
     op.drop_table('guild_settings')
     op.drop_table('guild_banned_users')
+    op.drop_table('global_settings')
+    op.drop_table('global_ng_words')
+    op.drop_table('global_chat_rooms')
+    op.drop_index('idx_gce_forwarded_map', table_name='global_chat_events', postgresql_using='gin')
+    op.drop_table('global_chat_events')
+    op.drop_index('idx_gcr_guild_room', table_name='global_chat_channels')
+    op.drop_table('global_chat_channels')
+    op.drop_index('idx_gcb_target', table_name='global_chat_bans')
+    op.drop_table('global_chat_bans')
     op.drop_index('idx_conversion_history_guild', table_name='conversion_history')
     op.drop_table('conversion_history')
     op.drop_index('idx_config_history_guild_key', table_name='config_history')
