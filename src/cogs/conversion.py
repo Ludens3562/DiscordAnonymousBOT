@@ -85,14 +85,17 @@ class ConversionCog(commands.Cog):
         try:
             config_cog: "ConfigCog" = self.bot.get_cog("ConfigCog")
             settings = await config_cog.get_guild_settings(db, str(original_message.guild.id))
-            guild_salt = settings.get('guild_salt', '')
             
             user_id = str(original_message.author.id)
-            user_id_signature = encryptor.sign_persistent_user_id(user_id, guild_salt)
+            # 変換履歴用にユーザーIDを暗号化する（投稿ごとにユニークなソルト）
+            import os
+            import base64
+            encryption_salt = os.urandom(16)
+            user_id_encrypted = encryptor.encrypt_user_id(user_id, encryptor.current_key_version, encryption_salt)
 
             history_entry = ConversionHistory(
                 guild_id=str(original_message.guild.id),
-                user_id_signature=user_id_signature,
+                user_id_encrypted=user_id_encrypted,
                 original_message_id=str(original_message.id),
                 converted_message_id=str(converted_message_id) if converted_message_id else None,
                 channel_id=str(original_message.channel.id),
