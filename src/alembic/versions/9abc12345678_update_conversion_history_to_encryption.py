@@ -27,8 +27,12 @@ def upgrade() -> None:
                     existing_type=sa.String(128),
                     existing_nullable=False)
     
-    # Add encryption_salt column
-    op.add_column('conversion_history', sa.Column('encryption_salt', sa.Text(), nullable=False, server_default=''))
+    # Add encryption_salt column as nullable first
+    op.add_column('conversion_history', sa.Column('encryption_salt', sa.Text(), nullable=True))
+    
+    # Note: Existing records will have NULL encryption_salt, which means they cannot be decrypted.
+    # This is acceptable as ConversionHistory is mainly for audit purposes and is not decrypted in the current implementation.
+    # Future records will have proper encryption_salt values.
 
 
 def downgrade() -> None:

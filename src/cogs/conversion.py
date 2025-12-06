@@ -1,4 +1,5 @@
 import os
+import base64
 import discord
 from discord.ext import commands
 from sqlalchemy.orm import Session
@@ -93,7 +94,6 @@ class ConversionCog(commands.Cog):
             user_id_encrypted = encryptor.encrypt_user_id(user_id, encryptor.current_key_version, encryption_salt)
 
             # Base64エンコードして保存
-            import base64
             encryption_salt_b64 = base64.b64encode(encryption_salt).decode()
 
             history_entry = ConversionHistory(
