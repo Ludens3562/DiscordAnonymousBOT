@@ -452,7 +452,7 @@ class ModerationCog(commands.Cog):
             elif deleted_status == DeletedStatus.exclude_deleted:
                 query = query.filter(AnonymousPost.deleted_at.is_(None))
             
-            all_posts_in_period = query.order_by(AnonymousPost.created_at.asc()).all()
+            all_posts_in_period = query.order_by(AnonymousPost.created_at.desc()).all()
 
             if not all_posts_in_period:
                 await interaction.followup.send(f"ℹ️ 過去{days}日間に検索対象の投稿はありませんでした。", ephemeral=True)
@@ -663,7 +663,7 @@ class ModerationCog(commands.Cog):
                 query = query.filter(AdminCommandLog.target_user_id == encrypted_target_id)
 
             total_logs = query.count()
-            logs = query.order_by(AdminCommandLog.created_at.asc()).all()
+            logs = query.order_by(AdminCommandLog.created_at.desc()).all()
 
             if not logs:
                 await interaction.followup.send("ℹ️ 指定された条件のログは見つかりませんでした。", ephemeral=True)
