@@ -13,6 +13,7 @@ from database import get_db
 DEFAULT_SETTINGS = {
     "rate_limit_count": 3,
     "rate_limit_window": 60,
+    "rate_limit_timeslot": 3600,
     "max_message_length": 2000,
     "anon_id_duration": 86400,
     "anon_id_format": "匿名ユーザー_{id}",
@@ -32,6 +33,7 @@ DEFAULT_SETTINGS = {
 SETTING_DESCRIPTIONS = {
     "rate_limit_count": "投稿のレート制限値",
     "rate_limit_window": "レート制限の期間(秒)",
+    "rate_limit_timeslot": "レート制限のタイムスロット(秒)",
     "max_message_length": "最大メッセージ長(文字)",
     "anon_id_duration": "匿名IDの有効期間(秒)",
     "anon_id_format": "匿名IDのフォーマット",
@@ -128,7 +130,7 @@ class ConfigCog(commands.Cog):
                     elif value in [None, ""]:
                         display_value = "未設定"
 
-                    embed.add_field(name=key, value=f"**{description}**\n`{display_value}`", inline=False)
+                    embed.add_field(name=f"{description} ({key})", value=f"`{display_value}`", inline=False)
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 

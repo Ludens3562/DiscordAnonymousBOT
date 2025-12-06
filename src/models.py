@@ -51,7 +51,8 @@ class ConversionHistory(Base):
 
     id = Column(BigInteger, primary_key=True)
     guild_id = Column(String(30), nullable=False)
-    user_id_signature = Column(String(128), nullable=False)
+    user_id_encrypted = Column(String(512), nullable=False)
+    encryption_salt = Column(Text, nullable=True)  # Nullable for backward compatibility with existing records
     original_message_id = Column(String(64), nullable=False)
     converted_message_id = Column(String(64))
     channel_id = Column(String(30), nullable=False)
