@@ -1,5 +1,11 @@
 """update conversion_history to use encryption
 
+This migration updates ConversionHistory table from the old signature-based 
+architecture to the new encryption-based architecture per the specification.
+
+Expected starting state: user_id_signature column exists (from d321d7633315_initial_schema)
+Target state: user_id_encrypted column with encryption_salt column added
+
 Revision ID: 9abc12345678
 Revises: 8fb7bc527ddd
 Create Date: 2025-12-06 20:50:00.000000
