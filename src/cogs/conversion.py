@@ -1,3 +1,4 @@
+import os
 import discord
 from discord.ext import commands
 from sqlalchemy.orm import Session
@@ -88,14 +89,17 @@ class ConversionCog(commands.Cog):
             
             user_id = str(original_message.author.id)
             # 変換履歴用にユーザーIDを暗号化する（投稿ごとにユニークなソルト）
-            import os
-            import base64
             encryption_salt = os.urandom(16)
             user_id_encrypted = encryptor.encrypt_user_id(user_id, encryptor.current_key_version, encryption_salt)
+
+            # Base64エンコードして保存
+            import base64
+            encryption_salt_b64 = base64.b64encode(encryption_salt).decode()
 
             history_entry = ConversionHistory(
                 guild_id=str(original_message.guild.id),
                 user_id_encrypted=user_id_encrypted,
+                encryption_salt=encryption_salt_b64,
                 original_message_id=str(original_message.id),
                 converted_message_id=str(converted_message_id) if converted_message_id else None,
                 channel_id=str(original_message.channel.id),

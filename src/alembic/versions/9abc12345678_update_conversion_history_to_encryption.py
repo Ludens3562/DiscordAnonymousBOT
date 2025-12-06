@@ -19,17 +19,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema - rename user_id_signature to user_id_encrypted in conversion_history."""
+    """Upgrade schema - rename user_id_signature to user_id_encrypted and add encryption_salt."""
     # Rename column and change type
     op.alter_column('conversion_history', 'user_id_signature',
                     new_column_name='user_id_encrypted',
                     type_=sa.String(512),
                     existing_type=sa.String(128),
                     existing_nullable=False)
+    
+    # Add encryption_salt column
+    op.add_column('conversion_history', sa.Column('encryption_salt', sa.Text(), nullable=False, server_default=''))
 
 
 def downgrade() -> None:
-    """Downgrade schema - rename user_id_encrypted back to user_id_signature."""
+    """Downgrade schema - remove encryption_salt and rename user_id_encrypted back to user_id_signature."""
+    # Remove encryption_salt column
+    op.drop_column('conversion_history', 'encryption_salt')
+    
     # Rename column back and change type
     op.alter_column('conversion_history', 'user_id_encrypted',
                     new_column_name='user_id_signature',
